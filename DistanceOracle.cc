@@ -94,7 +94,18 @@ throw(char *)
     }
 }
 
-// for quicksort
+/**
+ * Renumbers the elements of a permutation, subtracting
+ * them by val.
+ */
+inline void subtract( permutation_t elmts, int n, int val,
+                      permutation_t result )
+{
+    for (register int i=0; i<n; ++i)
+        result[i] = elmts[i] - val;
+}
+
+// for qsort in reduce_simple
 int compareElements(const void *x, const void *y)
 {
     element_t a = *(element_t *) x;
@@ -103,82 +114,130 @@ int compareElements(const void *x, const void *y)
 }
 
 /**
- * Método para obter a permutação reduzida
+ * Eliminates all 1-cycles of a permutation from which the
+ * leftmost and rightmost 1-cycles have already been removed.
+ * The reduced permutation is stored in result, which must have
+ * size newn.
  */
-permutation_t reduced_permutation( permutation_t elmts,
-                                   element_t n, element_t newn)
+inline void reduce_simple( permutation_t elmts, int n, int newn,
+                           permutation_t result )
 {
-    permutation_t reduced = new element_t[n];
-    permutation_t vet = new element_t[n];
+    register int i;
 
-    register element_t i = 0, j = 0;
+    // find the greatest element
+    element_t maxElmt = 0;
+    for (i = 0; i < n; ++i)
+        if ( elmts[i] > maxElmt )
+            maxElmt = elmts[i];
 
-    // step 1: collapse elements that are in order
-    // e. g.: [1,2,3,8,4,5,7,6,9,10] -> [8,4,7,6]            
-    //         \___/   \_/     \__/
-    //       (omitted)   4  (omitted)
-    for(i=0; i < n-1; ++i)
+    element_t reduced[newn], sorted[newn],
+              renumbering[maxElmt+1];
+    register element_t previous = 0;
+    register int count = 0;
+
+    // Step 1: for each sorted subsequence of adjacent
+    // elements, store the leftmost (smallest) one in
+    // the array reduced
+    // e.g.: elmts = [8,4,5,7,6]
+    //         ||     | \_/ | |
+    //         ||     |  |  | |
+    //         \/     v  v  v v
+    //       reduced=[8, 4 ,7,6]
+    for(i=0; i < n; ++i)
     {
-        if(elmts[i] != elmts[i+1] -1)
-        {
-            reduced[j] = elmts[i+1];
-            ++j;
-        }            
-        if(j == newn)
-            break;
+        if(elmts[i] != previous+1)
+            reduced[count++] = elmts[i];
+        previous = elmts[i];
     }
 
-    // step 2: sort the remaining elements.
-    // e. g.: [8,4,7,6] -> [4,6,7,8]
-    permutation_t order = new element_t[newn];
+    // Step 2: renumber the array
 
-    memcpy( order, reduced, newn*sizeof(element_t) );
+    // Step 2.1: sort the remaining elements
+    // e.g.: reduced=[8,4,7,6]  =>  sorted=[4,6,7,8]
+    memcpy( sorted, reduced, newn*sizeof(element_t) );
+    qsort( sorted, newn, sizeof(element_t), compareElements );
 
-    qsort(order, n, sizeof(element_t), compareElements);
-
-    // step 3: use the sorting to renumber the
-    //         remaining elements.
-    // e. g.: [8,4,7,6] -> [4,1,3,2]
+    // Step 2.2: with the elements sorted, renumber
+    // the reduced permutation
+    // e.g.:  from  sorted=[4,6,7,8]  obtain
+    //        renumbering=[ 4 => 1, 6 => 2, 7 => 3, 8 => 4 ]
+    //        and then
+    //        result = renumbering([8,4,7,6]) = [4,1,3,2]
     for(i = 0; i < newn; ++i)
-        vet[order[i]] = i+1;
-
+    {
+        renumbering[sorted[i]] = i+1;
+    }
     for(i = 0; i < newn; ++i)
-        reduced[i] = vet[reduced[i]];
-
-    delete order;
-    delete vet;
-
-    return reduced;
+    {
+        result[i] = renumbering[reduced[i]];
+    }
 }
 
 int DistanceOracle::query(permutation_t elmts, element_t n)
 {
-    rank_t rank = Permutation::rank(elmts, n);
-    int count;
+    // if the rightmost elements are already ordered, simply
+    // disregard them
+    // e.g.: [1,2,3,8,4,5,7,6,9,10] -> [1,2,3,8,4,5,7,6]
+    while (elmts[n-1] == n)
+        --n;
 
-    if(n <= MAX_ELEMENTS && distances[n] != NULL)
-        return distances[n]->get(rank);
+    if(n < MAX_ELEMENTS+1 && distances[n] != NULL)
+        return distances[n]->get(rank(elmts, n));
     else
     {
-        // Number of elements of the reduced permutation
-        if(elmts[0] == 1)
-            count = -1;
-        else
-            count = 1;
-        
-        for(register element_t i=0; i < n-1; ++i)
+        // find the leftmost element which is not ordered
+        // store its index in i
+        // e.g.: for [1,2,3,8,4,5,7,6] we have i=3
+        register int i=0;
+        while (elmts[i] == i+1)
+            ++i;
+
+        if ( i > 0 )
         {
-            if(elmts[i] != elmts[i+1] - 1)
-                ++count;
+            // disregard the leftmost ordered elements
+            // e.g.: [1,2,3,8,4,5,7,6] -> [8,4,5,7,6]
+            n = n-i;
+            elmts = &elmts[i];
+
+            // see if this permutation without the leftmost
+            // and rightmost ordered elements is already
+            // good enough
+            if(n < MAX_ELEMENTS+1 && distances[n] != NULL)
+            {
+                element_t result[n];
+                // renumber the remaining elements
+                // e.g.: [8,4,5,7,6] - 3 = [5,1,2,4,3]
+                subtract(elmts, n, i, result);
+                return distances[n]->get(
+                                   Permutation::rank(result, n));
+            }
         }
 
-        if(count <= MAX_ELEMENTS)
+        // in this point, we got rid of the ordered elements
+        // to the left and to the right of the permutation,
+        // but we may need to renumber the remaning elements
+        // and remove the remaining 1-cycles
+
+        // we'll first estimate the size of the reduced
+        // permutation
+        register element_t previous = 0;
+        register int count = 0; // no. elmts in reduced perm
+
+        for(register int j=0; j < n; j++)
         {
-            permutation_t reduced = reduced_permutation( elmts, n,
-                                                         count );
-            int d = query(reduced, count);
-            delete reduced;
-            return d;
+            if(elmts[j] != previous+1)
+                count++;
+            previous = elmts[j];
+        }
+
+        // if the reduced size is good enough, we effectively
+        // reduce the permutation and query the oracle
+        if(count < MAX_ELEMENTS +1 && distances[count] != NULL)
+        {
+            element_t result[count];
+            reduce_simple(elmts, n, count, result);
+            return distances[count]->get(
+                                   Permutation::rank(result, count));
         }
         else
             return -1;
