@@ -1,7 +1,7 @@
 DistanceOracle
 ==============
 
-A C++ API for querying the transposition distance database.
+A C++ library for querying the transposition distance database.
 
 Contains two example programs that show how to use the API:
 
